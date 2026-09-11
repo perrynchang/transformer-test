@@ -33,6 +33,10 @@ class CausalSelfAttention(nn.Module):
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         y = self.c_proj(y)
         return y
+    
+class TanhGELU(nn.Module):
+    def forward(self, input):
+        return 0.5 * input * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
 
 class MLP(nn.Module):
     
@@ -212,6 +216,9 @@ train_loader = DataLoaderLite(B=4, T=1024)
     
 model = GPT(GPTConfig())
 model.to(device)
+model = torch.compile(model)
+
+
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 for i in range(50):
     t0 = time.time()
