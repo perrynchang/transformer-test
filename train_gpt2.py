@@ -216,7 +216,7 @@ if torch.mps.is_available():
 
 train_loader = DataLoaderLite(B=4, T=1024)
     
-model = GPT(GPTConfig())
+model = GPT(GPTConfig(vocab_size=50304))
 model.to(device)
 model = torch.compile(model)
 
