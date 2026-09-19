@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+import torch.optim as optim
 
 class Head(nn.Module):
     def __init__(self, d_model, d_qkv, seq_length):
@@ -19,8 +20,10 @@ class Head(nn.Module):
         key = self.key(x)
         value = self.value(x)
 
+        T = x.size(-2)
+
         A = query @ key.transpose(-2, -1)
-        A = A.masked_fill(self.mask == 0, -math.inf)
+        A = A.masked_fill(self.mask[:T, :T] == 0, -math.inf)
         A /= math.sqrt(self.d_qkv)
 
         probs = F.softmax(A, dim = -1)
@@ -85,11 +88,12 @@ class Transformer(nn.Module):
         token_embds = self.token_embedding(idx)
 
 
-        T = idx.size(-1)
+        T = idx.shape[-1]
 
         pos_embs = self.pos_embedding(torch.arange(T))
         embds = token_embds + pos_embs
         embds = self.blocks(embds)
+        embds = self.norm(embds)
         logits = self.lmhead(embds)
 
         loss = None
@@ -97,6 +101,35 @@ class Transformer(nn.Module):
             loss = F.cross_entropy(logits, targets)
 
         return logits, loss
+    
+    @torch.no_grad()
+    def generate(self, idx, max_new_tokens):
+
+        for _ in range(max_new_tokens):
+            idx_cond = idx[-self.seq_length:]
+            logits, _ = self(idx_cond)
+            logits = logits[-1, :]
+            probs = F.softmax(logits, dim=-1)
+            sample = torch.multinomial(probs, num_samples=1)
+            idx = torch.concat((idx, sample), dim=-1)
+        return idx
+    
+
+vocab_size = 100
+model = Transformer(vocab_size=vocab_size)
+x = torch.randint(vocab_size, (256, ))
+y = torch.randint(vocab_size, (256, ))
+
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+for _ in range(100):
+    logits, loss = model(x,y)
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    optimizer.step()
+    print(loss)
+
+    
+print(model.generate(torch.tensor([99, 92, 13, 1, 18, 23, 4, 10, 13]), 10))
     
 
 
