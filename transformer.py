@@ -20,88 +20,88 @@ class Head(nn.Module):
         value = self.value(x)
 
         A = query @ key.transpose(-2, -1)
-        A /= math.sqrt(self.d_qkv)
         A = A.masked_fill(self.mask == 0, -math.inf)
+        A /= math.sqrt(self.d_qkv)
 
-        probs = F.softmax(A, dim=-1)
+        probs = F.softmax(A, dim = -1)
         return probs @ value
     
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model, num_heads, seq_length):
         super().__init__()
         assert d_model % num_heads == 0
-        d_qkv = d_model // num_heads
+        self.d_qkv = d_model // num_heads
+
         self.heads = nn.ModuleList([
-            Head(d_model, d_qkv, seq_length) for i in range(num_heads)
+            Head(d_model, self.d_qkv, seq_length) for _ in range(num_heads)
         ])
 
         self.output = nn.Linear(d_model, d_model, bias=False)
-
     def forward(self, x):
-        out = [h(x) for h in self.heads]
-        C = torch.concat(out, dim=-1)
+        outputs = [h(x) for h in self.heads]
+        C = torch.concat(outputs, dim=-1)
         return self.output(C)
-
-class FeedForwardNetwork(nn.Module):
-    def __init__(self, d_model, d_ff):
-        super().__init__()
-        self.W1 = nn.Linear(d_model, d_ff)
-        self.ReLU = nn.ReLU()
-        self.W2 = nn.Linear(d_ff, d_model)
     
+class FeedForwardNetwork(nn.Module):
+    def __init__(self, d_model, seq_length, d_ff):
+        super().__init__()
+        self.l1 = nn.Linear(d_model, d_ff)
+        self.ReLU = nn.ReLU()
+        self.l2 = nn.Linear(d_ff, d_model)
+
     def forward(self, x):
-        x = self.W1(x)
+        x = self.l1(x)
         x = self.ReLU(x)
-        x = self.W2(x)
+        x = self.l2(x)
         return x
 
 class Block(nn.Module):
-    def __init__(self, d_model, num_heads, seq_length):
+    def __init__(self, d_model, seq_length, num_heads):
         super().__init__()
-        self.attn = MultiHeadAttention(d_model, num_heads, seq_length)
-        self.ffn = FeedForwardNetwork(d_model, 4 * d_model)
+        self.attention = MultiHeadAttention(d_model, num_heads, seq_length)
+        self.ffn = FeedForwardNetwork(d_model, seq_length, 4*d_model)
+        self.ln1 = nn.RMSNorm(d_model)
+        self.ln2 = nn.RMSNorm(d_model)
 
-        self.rmsn1 = nn.RMSNorm(d_model)
-        self.rmsn2 = nn.RMSNorm(d_model)
     def forward(self, x):
-        x = x + self.attn(self.rmsn1(x))
-        return x + self.ffn(self.rmsn2(x))
-    
+        x = x + self.attention(self.ln1(x))
+        x = x + self.ffn(self.ln2(x))
+        return x
+
 class Transformer(nn.Module):
-    def __init__(self, vocab_size, d_model = 128, num_heads=16, num_layers = 4, seq_length = 32):
+    def __init__(self, vocab_size, d_model = 128, seq_length = 256, num_heads= 16, layers = 4):
         super().__init__()
-        
         self.token_embedding = nn.Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
-        self.positional_embedding = nn.Embedding(num_embeddings=seq_length, embedding_dim=d_model)
-
-        self.transformer_blocks = nn.Sequential(
-            *[Block(d_model=d_model, num_heads=num_heads, seq_length=seq_length) for _ in range(num_layers)]
+        self.pos_embedding = nn.Embedding(num_embeddings=seq_length, embedding_dim=d_model)
+        self.blocks = nn.Sequential(
+            *[Block(d_model, seq_length, num_heads) for _ in range(layers)]
         )
-        self.RMSNorm = nn.RMSNorm(d_model)
 
+        self.norm = nn.RMSNorm(d_model)
         self.lmhead = nn.Linear(d_model, vocab_size)
+        self.seq_length = seq_length
 
     def forward(self, idx, targets=None):
-        #idx:(T,)
-        #targets:(T,)
-        T = idx.shape
-        token_emb = self.token_embedding(idx)
+        token_embds = self.token_embedding(idx)
 
-        positions = torch.tensor(torch.arange(T))
-        pos_emb = self.positional_embedding(positions)
 
-        emb = token_emb + pos_emb
+        T = idx.size(-1)
 
-        emb = self.transformer_blocks(emb)
-        emb = self.RMSNorm(emb)
-        logits = self.lmhead(emb)
+        pos_embs = self.pos_embedding(torch.arange(T))
+        embds = token_embds + pos_embs
+        embds = self.blocks(embds)
+        logits = self.lmhead(embds)
 
         loss = None
-
-        if targets:
+        if targets is not None:
             loss = F.cross_entropy(logits, targets)
 
         return logits, loss
+    
+
+
+
+
     
 
 
