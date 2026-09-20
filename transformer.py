@@ -40,13 +40,14 @@ class MultiHeadAttention(nn.Module):
         ])
 
         self.output = nn.Linear(d_model, d_model, bias=False)
+
     def forward(self, x):
         outputs = [h(x) for h in self.heads]
         C = torch.concat(outputs, dim=-1)
         return self.output(C)
     
 class FeedForwardNetwork(nn.Module):
-    def __init__(self, d_model, seq_length, d_ff):
+    def __init__(self, d_model, d_ff):
         super().__init__()
         self.l1 = nn.Linear(d_model, d_ff)
         self.ReLU = nn.ReLU()
@@ -62,7 +63,7 @@ class Block(nn.Module):
     def __init__(self, d_model, seq_length, num_heads):
         super().__init__()
         self.attention = MultiHeadAttention(d_model, num_heads, seq_length)
-        self.ffn = FeedForwardNetwork(d_model, seq_length, 4*d_model)
+        self.ffn = FeedForwardNetwork(d_model, 4*d_model)
         self.ln1 = nn.RMSNorm(d_model)
         self.ln2 = nn.RMSNorm(d_model)
 
@@ -72,64 +73,53 @@ class Block(nn.Module):
         return x
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_size, d_model = 128, seq_length = 256, num_heads= 16, layers = 4):
+    def __init__(self, vocab_size, d_model = 128, num_heads=16, seq_length=64, layers=4):
         super().__init__()
-        self.token_embedding = nn.Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
+        self.tok_embedding = nn.Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
         self.pos_embedding = nn.Embedding(num_embeddings=seq_length, embedding_dim=d_model)
+
         self.blocks = nn.Sequential(
-            *[Block(d_model, seq_length, num_heads) for _ in range(layers)]
+            *[Block(d_model=d_model, seq_length=seq_length, num_heads=num_heads) for _ in range(layers)]
         )
 
         self.norm = nn.RMSNorm(d_model)
-        self.lmhead = nn.Linear(d_model, vocab_size)
+        self.lmhead = nn.Linear(d_model, vocab_size, bias=False)
         self.seq_length = seq_length
 
     def forward(self, idx, targets=None):
-        token_embds = self.token_embedding(idx)
+        B, T= idx.shape
+        embds = self.tok_embedding(idx)
+        pos_embds = self.pos_embedding(torch.arange(T))
+        embds += pos_embds
 
-
-        T = idx.shape[-1]
-
-        pos_embs = self.pos_embedding(torch.arange(T))
-        embds = token_embds + pos_embs
         embds = self.blocks(embds)
         embds = self.norm(embds)
         logits = self.lmhead(embds)
-
+        
+        
         loss = None
         if targets is not None:
-            loss = F.cross_entropy(logits, targets)
+            loss = F.cross_entropy(logits.view(B*T, -1), targets.view(B*T))
 
         return logits, loss
-    
-    @torch.no_grad()
-    def generate(self, idx, max_new_tokens):
 
-        for _ in range(max_new_tokens):
-            idx_cond = idx[-self.seq_length:]
+    @torch.no_grad
+    def generate(self, idx, max_tokens_generate):
+        for i in range(max_tokens_generate):
+            idx_cond = idx[:, -self.seq_length:]
             logits, _ = self(idx_cond)
-            logits = logits[-1, :]
+            logits = logits[:, -1, :]
             probs = F.softmax(logits, dim=-1)
-            sample = torch.multinomial(probs, num_samples=1)
-            idx = torch.concat((idx, sample), dim=-1)
+            sample = torch.multinomial(probs,  num_samples=1)
+            idx = torch.concat((idx, sample), dim=1)
         return idx
     
-
-vocab_size = 100
-model = Transformer(vocab_size=vocab_size)
-x = torch.randint(vocab_size, (256, ))
-y = torch.randint(vocab_size, (256, ))
-
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-for _ in range(100):
-    logits, loss = model(x,y)
-    optimizer.zero_grad(set_to_none=True)
-    loss.backward()
-    optimizer.step()
-    print(loss)
-
-    
-print(model.generate(torch.tensor([99, 92, 13, 1, 18, 23, 4, 10, 13]), 10))
+vocab_size = 200
+model = Transformer(vocab_size=200)
+x = torch.randint(vocab_size, (8, 64))
+y = torch.randint(vocab_size, (8, 64))
+logits, loss = model(x, y)
+print(loss)
     
 
 
