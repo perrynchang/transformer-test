@@ -116,6 +116,7 @@ class Transformer(nn.Module):
     
 vocab_size = 200
 model = Transformer(vocab_size=200)
+print(sum(p.numel() for p in model.parameters()))
 x = torch.randint(vocab_size, (8, 64))
 y = torch.randint(vocab_size, (8, 64))
 logits, loss = model(x, y)
