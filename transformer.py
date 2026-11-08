@@ -5,7 +5,7 @@ import math
 
 class Head(nn.Module):
     def __init__(self, d_model, d_kqv, L):
-        super.__init__()
+        super().__init__()
         self.q = nn.Linear(d_model, d_kqv, bias=False)
         self.k = nn.Linear(d_model, d_kqv, bias=False)
         self.v = nn.Linear(d_model, d_kqv, bias=False)
@@ -46,6 +46,40 @@ class FF(nn.Module):
         x = self.f1(x)
         x = self.relu(x)
         return self.f2(x)
+    
+class Block(nn.Module):
+    def __init__(self, d_model, n_head, L):
+        super().__init__()
+        self.attention1 = MultiHeadAttention(n_head, d_model, L)
+        self.rms1 = nn.RMSNorm(normalized_shape=d_model)
+        self.dense = FF(d_model)
+        self.rms2 = nn.RMSNorm(normalized_shape=d_model)
+        
+    def forward(self, x):
+        x = x + self.attention1(self.rms1(x))
+        x = x + self.dense(self.rms2(x))
+        return x
+    
+class Transformer(nn.Module):
+    def __init__(self, d_model, layer_count, L, vocab_size, n_head):
+        super().__init__()
+        self.vocab_embedding = nn.Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
+        self.pos_embedding = nn.Embedding(num_embeddings=L, embedding_dim=d_model)
+
+        blocks = [Block(d_model, n_head, L) for _ in range(layer_count)]
+        self.layers = nn.Sequential(*blocks)
+        self.norm = nn.RMSNorm(d_model)
+        self.out = nn.Linear(d_model, vocab_size)
+        self.out.weight = self.vocab_embedding.weight
+    def forward(self, x):
+        v_embedding = self.vocab_embedding(x)
+        p_embedding = self.pos_embedding(x)
+        embedding = v_embedding + p_embedding
+        embedding = self.layers(embedding)
+        embedding = self.norm(embedding)
+        logits = self.out(embedding)
+        return logits
+
 
 
 
